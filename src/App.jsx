@@ -87,6 +87,22 @@ function blobToDataUrl(blob) {
   });
 }
 
+const outfitLayerOrder = { Bottom: 1, Shoes: 2, Top: 3, Dress: 4, Outerwear: 5, Accessory: 6 };
+
+function LayeredOutfitPreview({ items, compact = false }) {
+  const orderedItems = [...items].sort((a, b) => (outfitLayerOrder[a.category] ?? 3) - (outfitLayerOrder[b.category] ?? 3));
+  return (
+    <div className={`layered-look${compact ? ' layered-look-compact' : ''}`} role="img" aria-label={`Layered outfit preview with ${items.length} selected pieces`}>
+      {orderedItems.length ? orderedItems.map((item, index) => (
+        <div className={`layered-piece layered-piece-${(item.category || 'Top').toLowerCase()}`} key={item.id} style={{ '--piece-order': index }}>
+          <img src={item.image} alt="" />
+        </div>
+      )) : <div className="look-empty"><Shirt size={25} /></div>}
+      {items.length > 0 && <span className="layered-look-caption">2D LAYERED PREVIEW</span>}
+    </div>
+  );
+}
+
 function App() {
   const [items, setItems] = useState(loadItems);
   const [looks, setLooks] = useState(loadLooks);
@@ -96,6 +112,7 @@ function App() {
   const [seasonFilter, setSeasonFilter] = useState('Any season');
   const [sortNewest, setSortNewest] = useState(true);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [previewMode, setPreviewMode] = useState('pieces');
   const [editingItem, setEditingItem] = useState(null);
   const [form, setForm] = useState(initialForm(null));
   const [modalOpen, setModalOpen] = useState(false);
@@ -285,6 +302,10 @@ function App() {
     setSelectedIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]);
   }
 
+  function changeItemCategory(id, category) {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, category } : item));
+  }
+
   function saveLook(event) {
     event.preventDefault();
     if (!selectedItems.length) return;
@@ -463,14 +484,21 @@ function App() {
               <div className="outfit-panel-top"><span className="eyebrow">On the outfit</span><span className="hanger-icon"><LayoutGrid size={18} /></span></div>
               <h2>Today's edit</h2>
               {selectedItems.length ? <>
-                <div className="outfit-board" role="img" aria-label={`Outfit preview with ${selectedItems.length} selected pieces`}>
+                <div className="preview-mode-switch" role="group" aria-label="Outfit preview mode">
+                  <button type="button" className={previewMode === 'pieces' ? 'active' : ''} aria-pressed={previewMode === 'pieces'} onClick={() => setPreviewMode('pieces')}>Pieces</button>
+                  <button type="button" className={previewMode === 'look' ? 'active' : ''} aria-pressed={previewMode === 'look'} onClick={() => setPreviewMode('look')}>See your look</button>
+                </div>
+                {previewMode === 'look' ? <>
+                  <LayeredOutfitPreview items={selectedItems} />
+                  <p className="layering-hint">Set each piece’s Type below to place it: tops above bottoms, outerwear on top. Light photo backgrounds blend into the preview.</p>
+                </> : <div className="outfit-board" role="img" aria-label={`Outfit preview with ${selectedItems.length} selected pieces`}>
                   {selectedItems.map((item) => <div className="board-piece" key={item.id}>
                     <img src={item.image} alt="" />
                     <span>{item.name}</span>
                     <small>{item.category}</small>
                   </div>)}
-                </div>
-                <div className="outfit-preview">{selectedItems.map((item) => <div className="outfit-piece" key={item.id}><img src={item.image} alt={item.name} /><div><strong>{item.name}</strong><span>{item.category}</span></div><button className="icon-button" onClick={() => toggleSelection(item.id)} aria-label={`Remove ${item.name} from outfit`}><X size={15} /></button></div>)}</div>
+                </div>}
+                <div className="outfit-preview" aria-label="Selected outfit pieces">{selectedItems.map((item) => <div className="outfit-piece" key={item.id}><img src={item.image} alt={item.name} /><div><strong>{item.name}</strong><label className="sr-only" htmlFor={`outfit-type-${item.id}`}>Type for {item.name}</label><select id={`outfit-type-${item.id}`} value={item.category} onChange={(event) => changeItemCategory(item.id, event.target.value)}>{CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></div><button className="icon-button" onClick={() => toggleSelection(item.id)} aria-label={`Remove ${item.name} from outfit`}><X size={15} /></button></div>)}</div>
               </> : <div className="outfit-placeholder"><Shirt size={28} strokeWidth={1.3} /><p>Your pieces will find their place here.</p></div>}
               <form className="save-look-form" onSubmit={saveLook}>
                 <label>Look name <input value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="e.g. Sunday in the city" maxLength={70} /></label>
@@ -488,7 +516,7 @@ function App() {
             {looks.length ? <div className="looks-grid">{looks.map((look) => {
               const lookItems = look.itemIds.map((id) => items.find((item) => item.id === id)).filter(Boolean);
               return <article className="look-card" key={look.id}>
-                <div className="look-images">{lookItems.map((item) => <img src={item.image} alt={item.name} key={item.id} />)}{!lookItems.length && <div className="look-empty"><Shirt size={25} /></div>}</div>
+                <div className="look-images"><LayeredOutfitPreview items={lookItems} compact /></div>
                 <div className="look-details"><div><p className="eyebrow">{new Date(look.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</p><h3>{look.name}</h3></div><span>{lookItems.length} {lookItems.length === 1 ? 'piece' : 'pieces'}</span></div>
                 {look.notes && <p className="look-notes">{look.notes}</p>}
                 <div className="look-actions"><button className="text-action" onClick={() => revisitLook(look)}>Open in builder</button><button className="icon-button" onClick={() => requestDelete({ id: look.id, name: look.name, type: 'look' })} aria-label={`Delete ${look.name}`} title="Delete look"><Trash2 size={16} /></button></div>
@@ -558,3 +586,4 @@ function App() {
 }
 
 export default App;
+
