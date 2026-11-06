@@ -20,7 +20,7 @@ Open the local URL printed by Vite. To create and preview a production build, ru
 - Compare the original upload with a live crop preview. Zoom and position sliders update the frame immediately; horizontal positioning zooms in slightly when needed to make room to pan.
 - Remove the background with `@imgly/background-removal`, an in-browser segmentation model. The result is shown over a transparency grid and saved as alpha-capable WebP or PNG, never JPEG. The original upload remains available to compare, retry, or keep instead.
 - Select specific closet pieces and switch between a piece board and a layered 2D outfit preview. Layer placement follows each piece's type, which can be adjusted directly in the builder. Saved looks also use the layered preview. This is a 2D composition preview, not a virtual try-on or 3D fit simulation.
-- Closet items and saved looks are separate collections. They persist in this browser using localStorage; photos are resized and compressed before saving.
+- Closet items and saved looks are separate collections. They persist in this browser using localStorage; photos are resized and compressed before saving, and each collection reports its own storage errors.
 
 ## Background-removal requirements
 
