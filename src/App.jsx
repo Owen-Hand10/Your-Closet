@@ -87,7 +87,8 @@ function App() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [saveName, setSaveName] = useState('');
   const [saveNotes, setSaveNotes] = useState('');
-  const [storageError, setStorageError] = useState('');
+  const [itemStorageError, setItemStorageError] = useState('');
+  const [lookStorageError, setLookStorageError] = useState('');
   const [photoError, setPhotoError] = useState('');
   const [processing, setProcessing] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -96,13 +97,13 @@ function App() {
   const fileInput = useRef(null);
 
   useEffect(() => {
-    try { saveItems(items); setStorageError(''); }
-    catch { setStorageError('Browser storage is full. Remove a few large photos or use smaller images to keep saving.'); }
+    try { saveItems(items); setItemStorageError(''); }
+    catch { setItemStorageError('Closet changes could not be saved. Browser storage may be full; remove large photos or use smaller images.'); }
   }, [items]);
 
   useEffect(() => {
-    try { saveLooks(looks); setStorageError(''); }
-    catch { setStorageError('Browser storage is full. Remove a few large photos or use smaller images to keep saving.'); }
+    try { saveLooks(looks); setLookStorageError(''); }
+    catch { setLookStorageError('Saved looks could not be saved. Browser storage may be full; remove large photos or use smaller images.'); }
   }, [looks]);
 
   useEffect(() => {
@@ -238,7 +239,8 @@ function App() {
           <p className="intro-note">Get to know what you own. Find new ways to wear it.</p>
         </section>
 
-        {storageError && <p className="storage-alert" role="alert">{storageError}</p>}
+        {itemStorageError && <p className="storage-alert" role="alert">{itemStorageError}</p>}
+        {lookStorageError && <p className="storage-alert" role="alert">{lookStorageError}</p>}
 
         {view === 'closet' && (
           <section aria-label="Virtual closet">
