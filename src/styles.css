@@ -352,3 +352,5 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (prefers-reduced-motion: reduce) {
   .home-card { transition: none; }
 }
+
+.crop-hint { margin: 5px 0 0; color: #93998f; font-size: 9px; line-height: 1.5; }
