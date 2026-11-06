@@ -16,9 +16,10 @@ Open the local URL printed by Vite. To create and preview a production build, ru
 ## What works
 
 - Add clothing photos and record type, color, season, occasion, and notes. Edit, search, filter, sort, and remove closet items.
-- Compare the original upload with an exact live crop preview. Zoom and position sliders update the frame immediately; confirming the item saves that same crop.
+- Start from a dedicated home page with shortcuts into the closet, outfit builder, and saved looks.
+- Compare the original upload with a live crop preview. Zoom and position sliders update the frame immediately; horizontal positioning zooms in slightly when needed to make room to pan.
 - Remove the background with `@imgly/background-removal`, an in-browser segmentation model. The result is shown over a transparency grid and saved as alpha-capable WebP or PNG, never JPEG. The original upload remains available to compare, retry, or keep instead.
-- Select specific closet pieces, arrange them in an outfit preview, and save looks with an optional name and notes. Reopen or delete a saved look with confirmation.
+- Select specific closet pieces and see them together in a side-by-side outfit board. Save looks with an optional name and notes, reopen them in the builder, or delete them with confirmation. This is a 2D composition preview, not a virtual try-on or 3D fit simulation.
 - Closet items and saved looks are separate collections. They persist in this browser using localStorage; photos are resized and compressed before saving.
 
 ## Background-removal requirements
