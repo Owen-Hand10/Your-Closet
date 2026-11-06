@@ -9,7 +9,7 @@ import { removeImageBackground } from './services/backgroundRemoval.js';
 const CATEGORIES = ['Top', 'Bottom', 'Dress', 'Outerwear', 'Shoes', 'Accessory'];
 const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter', 'All season'];
 const OCCASIONS = ['Everyday', 'Work', 'Evening', 'Weekend', 'Occasion'];
-const HERO_IMAGE = 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1400&q=85';
+const HERO_IMAGE = 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=90';
 
 function makeId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -87,22 +87,40 @@ function blobToDataUrl(blob) {
   });
 }
 
+const outfitLayerOrder = { Bottom: 1, Shoes: 2, Top: 3, Dress: 4, Outerwear: 5, Accessory: 6 };
+
+function LayeredOutfitPreview({ items, compact = false }) {
+  const orderedItems = [...items].sort((a, b) => (outfitLayerOrder[a.category] ?? 3) - (outfitLayerOrder[b.category] ?? 3));
+  return (
+    <div className={`layered-look${compact ? ' layered-look-compact' : ''}`} role="img" aria-label={`Layered outfit preview with ${items.length} selected pieces`}>
+      {orderedItems.length ? orderedItems.map((item, index) => (
+        <div className={`layered-piece layered-piece-${(item.category || 'Top').toLowerCase()}`} key={item.id} style={{ '--piece-order': index }}>
+          <img src={item.image} alt="" />
+        </div>
+      )) : <div className="look-empty"><Shirt size={25} /></div>}
+      {items.length > 0 && <span className="layered-look-caption">2D LAYERED PREVIEW</span>}
+    </div>
+  );
+}
+
 function App() {
   const [items, setItems] = useState(loadItems);
   const [looks, setLooks] = useState(loadLooks);
-  const [view, setView] = useState('closet');
+  const [view, setView] = useState('home');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All pieces');
   const [seasonFilter, setSeasonFilter] = useState('Any season');
   const [sortNewest, setSortNewest] = useState(true);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [previewMode, setPreviewMode] = useState('pieces');
   const [editingItem, setEditingItem] = useState(null);
   const [form, setForm] = useState(initialForm(null));
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [saveName, setSaveName] = useState('');
   const [saveNotes, setSaveNotes] = useState('');
-  const [storageError, setStorageError] = useState('');
+  const [itemStorageError, setItemStorageError] = useState('');
+  const [lookStorageError, setLookStorageError] = useState('');
   const [photoError, setPhotoError] = useState('');
   const [processing, setProcessing] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -132,13 +150,13 @@ function App() {
   }, [sourceSize, previewSize, crop]);
 
   useEffect(() => {
-    try { saveItems(items); setStorageError(''); }
-    catch { setStorageError('Browser storage is full. Remove a few large photos or use smaller images to keep saving.'); }
+    try { saveItems(items); setItemStorageError(''); }
+    catch { setItemStorageError('Closet changes could not be saved. Browser storage may be full; remove large photos or use smaller images.'); }
   }, [items]);
 
   useEffect(() => {
-    try { saveLooks(looks); setStorageError(''); }
-    catch { setStorageError('Browser storage is full. Remove a few large photos or use smaller images to keep saving.'); }
+    try { saveLooks(looks); setLookStorageError(''); }
+    catch { setLookStorageError('Saved looks could not be saved. Browser storage may be full; remove large photos or use smaller images.'); }
   }, [looks]);
 
   useEffect(() => {
@@ -285,6 +303,10 @@ function App() {
     setSelectedIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]);
   }
 
+  function changeItemCategory(id, category) {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, category } : item));
+  }
+
   function saveLook(event) {
     event.preventDefault();
     if (!selectedItems.length) return;
@@ -314,6 +336,19 @@ function App() {
     setView('builder');
   }
 
+  function updateHorizontalFocus(value) {
+    setCrop((current) => {
+      const frameAspect = previewSize.width && previewSize.height ? previewSize.width / previewSize.height : 0;
+      const sourceAspect = sourceSize.width && sourceSize.height ? sourceSize.width / sourceSize.height : 0;
+      const needsHorizontalRoom = frameAspect && sourceAspect && sourceAspect <= frameAspect;
+      return {
+        ...current,
+        zoom: needsHorizontalRoom ? Math.max(current.zoom, 1.08) : current.zoom,
+        focusX: Number(value),
+      };
+    });
+  }
+
   const activeLabel = view === 'closet' ? 'Your wardrobe, at a glance.' : view === 'builder' ? 'A little outfit alchemy.' : 'The looks worth keeping.';
 
   return (
@@ -324,6 +359,7 @@ function App() {
           <span>your closet<span className="wordmark-period">.</span></span>
         </a>
         <nav className="main-nav" aria-label="Main navigation">
+          <button className={view === 'home' ? 'nav-link active' : 'nav-link'} onClick={() => setView('home')}>Home</button>
           <button className={view === 'closet' ? 'nav-link active' : 'nav-link'} onClick={() => setView('closet')}>The closet <span>{items.length}</span></button>
           <button className={view === 'builder' ? 'nav-link active' : 'nav-link'} onClick={() => setView('builder')}>Outfit builder</button>
           <button className={view === 'looks' ? 'nav-link active' : 'nav-link'} onClick={() => setView('looks')}>Saved looks <span>{looks.length}</span></button>
@@ -332,16 +368,59 @@ function App() {
       </header>
 
       <main>
-        <section className="page-intro">
+        {view !== 'home' && <section className="page-intro">
           <div>
             <p className="eyebrow">A more considered wardrobe</p>
             <h1>{activeLabel}</h1>
           </div>
           <p className="intro-note">Get to know what you own. Find new ways to wear it.</p>
-        </section>
+        </section>}
 
-        {storageError && <p className="storage-alert" role="alert">{storageError}</p>}
+        {itemStorageError && <p className="storage-alert" role="alert">{itemStorageError}</p>}
+        {lookStorageError && <p className="storage-alert" role="alert">{lookStorageError}</p>}
         {feedback && <p className="feedback-toast" role="status">{feedback}</p>}
+
+        {view === 'home' && (
+          <section className="home-view view-motion" aria-label="Your Closet home">
+            <div className="home-hero">
+              <img src={HERO_IMAGE} alt="Fashion editorial portrait in a layered outfit" />
+              <div className="home-hero-shade" />
+              <div className="home-hero-copy">
+                <p className="eyebrow">Your wardrobe, reimagined</p>
+                <h1>See your clothes<br />in a new light.</h1>
+                <p>Bring the pieces you already own together and find a look that feels like you.</p>
+                <div className="home-hero-actions">
+                  <button className="button button-dark" onClick={() => setView('builder')}><Sparkles size={16} /> Build a look</button>
+                  <button className="button button-outline home-secondary" onClick={() => setView('closet')}>Explore your closet</button>
+                </div>
+              </div>
+              <span className="home-image-credit">A more personal way to get dressed</span>
+            </div>
+            <div className="home-overview">
+              <div className="home-overview-heading">
+                <div><p className="eyebrow">A wardrobe that works harder</p><h2>Your style, all in one place.</h2></div>
+                <button className="text-action" onClick={() => setView('closet')}>View the closet <ChevronDown size={14} className="turn-icon" /></button>
+              </div>
+              <div className="home-card-grid">
+                <button className="home-card" onClick={() => setView('closet')}>
+                  <span className="home-card-number">{items.length.toString().padStart(2, '0')}</span>
+                  <span className="home-card-title">Pieces in your closet</span>
+                  <span className="home-card-note">Keep the things you own in view.</span>
+                </button>
+                <button className="home-card" onClick={() => setView('builder')}>
+                  <span className="home-card-number"><LayoutGrid size={25} /></span>
+                  <span className="home-card-title">Put a look together</span>
+                  <span className="home-card-note">See your selected pieces side by side.</span>
+                </button>
+                <button className="home-card" onClick={() => setView('looks')}>
+                  <span className="home-card-number">{looks.length.toString().padStart(2, '0')}</span>
+                  <span className="home-card-title">Looks saved</span>
+                  <span className="home-card-note">Return to outfits you want to wear again.</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
 
         {view === 'closet' && (
           <section className="closet-view view-motion" aria-label="Virtual closet">
@@ -406,7 +485,23 @@ function App() {
             <aside className="outfit-panel">
               <div className="outfit-panel-top"><span className="eyebrow">On the outfit</span><span className="hanger-icon"><LayoutGrid size={18} /></span></div>
               <h2>Today's edit</h2>
-              {selectedItems.length ? <div className="outfit-preview">{selectedItems.map((item) => <div className="outfit-piece" key={item.id}><img src={item.image} alt={item.name} /><div><strong>{item.name}</strong><span>{item.category}</span></div><button className="icon-button" onClick={() => toggleSelection(item.id)} aria-label={`Remove ${item.name} from outfit`}><X size={15} /></button></div>)}</div> : <div className="outfit-placeholder"><Shirt size={28} strokeWidth={1.3} /><p>Your pieces will find their place here.</p></div>}
+              {selectedItems.length ? <>
+                <div className="preview-mode-switch" role="group" aria-label="Outfit preview mode">
+                  <button type="button" className={previewMode === 'pieces' ? 'active' : ''} aria-pressed={previewMode === 'pieces'} onClick={() => setPreviewMode('pieces')}>Pieces</button>
+                  <button type="button" className={previewMode === 'look' ? 'active' : ''} aria-pressed={previewMode === 'look'} onClick={() => setPreviewMode('look')}>See your look</button>
+                </div>
+                {previewMode === 'look' ? <>
+                  <LayeredOutfitPreview items={selectedItems} />
+                  <p className="layering-hint">Set each piece’s Type below to place it: tops above bottoms, outerwear on top. Light photo backgrounds blend into the preview.</p>
+                </> : <div className="outfit-board" role="img" aria-label={`Outfit preview with ${selectedItems.length} selected pieces`}>
+                  {selectedItems.map((item) => <div className="board-piece" key={item.id}>
+                    <img src={item.image} alt="" />
+                    <span>{item.name}</span>
+                    <small>{item.category}</small>
+                  </div>)}
+                </div>}
+                <div className="outfit-preview" aria-label="Selected outfit pieces">{selectedItems.map((item) => <div className="outfit-piece" key={item.id}><img src={item.image} alt={item.name} /><div><strong>{item.name}</strong><label className="sr-only" htmlFor={`outfit-type-${item.id}`}>Type for {item.name}</label><select id={`outfit-type-${item.id}`} value={item.category} onChange={(event) => changeItemCategory(item.id, event.target.value)}>{CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></div><button className="icon-button" onClick={() => toggleSelection(item.id)} aria-label={`Remove ${item.name} from outfit`}><X size={15} /></button></div>)}</div>
+              </> : <div className="outfit-placeholder"><Shirt size={28} strokeWidth={1.3} /><p>Your pieces will find their place here.</p></div>}
               <form className="save-look-form" onSubmit={saveLook}>
                 <label>Look name <input value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="e.g. Sunday in the city" maxLength={70} /></label>
                 <label>Notes <textarea value={saveNotes} onChange={(event) => setSaveNotes(event.target.value)} placeholder="A thought, a mood, the occasion…" rows={2} maxLength={240} /></label>
@@ -423,7 +518,7 @@ function App() {
             {looks.length ? <div className="looks-grid">{looks.map((look) => {
               const lookItems = look.itemIds.map((id) => items.find((item) => item.id === id)).filter(Boolean);
               return <article className="look-card" key={look.id}>
-                <div className="look-images">{lookItems.slice(0, 3).map((item) => <img src={item.image} alt={item.name} key={item.id} />)}{!lookItems.length && <div className="look-empty"><Shirt size={25} /></div>}</div>
+                <div className="look-images"><LayeredOutfitPreview items={lookItems} compact /></div>
                 <div className="look-details"><div><p className="eyebrow">{new Date(look.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</p><h3>{look.name}</h3></div><span>{lookItems.length} {lookItems.length === 1 ? 'piece' : 'pieces'}</span></div>
                 {look.notes && <p className="look-notes">{look.notes}</p>}
                 <div className="look-actions"><button className="text-action" onClick={() => revisitLook(look)}>Open in builder</button><button className="icon-button" onClick={() => requestDelete({ id: look.id, name: look.name, type: 'look' })} aria-label={`Delete ${look.name}`} title="Delete look"><Trash2 size={16} /></button></div>
@@ -433,7 +528,7 @@ function App() {
         )}
       </main>
 
-      <footer className="site-footer"><span>YOUR CLOSET, YOURS ALONE.</span><span>Made for wearing, not just collecting.</span><button onClick={() => setView('closet')}>Back to your closet <ChevronDown size={13} className="turn-icon" /></button></footer>
+      <footer className="site-footer"><span>YOUR CLOSET, YOURS ALONE.</span><span>Made for wearing, not just collecting.</span><button onClick={() => setView('home')}>Back to home <ChevronDown size={13} className="turn-icon" /></button></footer>
 
       {modalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setModalOpen(false); }}>
         <section className="item-modal" ref={itemDialog} role="dialog" aria-modal="true" aria-labelledby="item-modal-title">
@@ -456,7 +551,8 @@ function App() {
                   <div className="crop-heading"><div><p className="eyebrow">Image cleanup</p><h3>Refine your frame</h3></div><button className="icon-button reset-crop" type="button" onClick={() => setCrop({ zoom: 1, focusX: 0.5, focusY: 0.5 })} aria-label="Reset crop framing" title="Reset crop framing"><RotateCcw size={15} /></button></div>
                   <p className="prototype-copy">Crop changes appear in the preview immediately and are saved when you add this piece. Background removal runs in this browser; its model downloads on first use.</p>
                   <label className="range-label">Zoom <input type="range" min="1" max="2.5" step="0.05" value={crop.zoom} onChange={(event) => setCrop((current) => ({ ...current, zoom: Number(event.target.value) }))} /><span>{crop.zoom.toFixed(1)}x</span></label>
-                  <label className="range-label">Horizontal <input type="range" min="0" max="1" step="0.01" value={crop.focusX} onChange={(event) => setCrop((current) => ({ ...current, focusX: Number(event.target.value) }))} /><span>{Math.round(crop.focusX * 100)}%</span></label>
+                  <label className="range-label">Horizontal position <input type="range" min="0" max="1" step="0.01" value={crop.focusX} onChange={(event) => updateHorizontalFocus(event.target.value)} /><span>{Math.round(crop.focusX * 100)}%</span></label>
+                  <p className="crop-hint">If the image has no room to pan at the current crop, this control zooms in slightly to create room.</p>
                   <label className="range-label">Vertical <input type="range" min="0" max="1" step="0.01" value={crop.focusY} onChange={(event) => setCrop((current) => ({ ...current, focusY: Number(event.target.value) }))} /><span>{Math.round(crop.focusY * 100)}%</span></label>
                   <div className="background-actions">
                     <button className="button button-outline remove-background" type="button" onClick={handleBackgroundRemoval} disabled={processing}><Sparkles size={15} /> {removalStatus === 'processing' ? 'Removing background…' : removalStatus === 'success' ? 'Try again' : removalStatus === 'error' ? 'Retry removal' : 'Remove background'}</button>
@@ -492,3 +588,4 @@ function App() {
 }
 
 export default App;
+
