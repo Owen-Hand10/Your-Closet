@@ -326,6 +326,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .outfit-board + .outfit-preview { margin-top: 9px; }
 .look-images { display: grid; grid-template-columns: repeat(auto-fit, minmax(52px, 1fr)); grid-auto-rows: 1fr; align-items: stretch; }
 .look-images img { width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #222520; }
+.outfit-piece select { width: 100%; margin-top: 3px; padding: 2px 4px; border: 1px solid #454a43; background: #171a17; color: var(--green); font-size: 9px; cursor: pointer; }
+.outfit-piece select option { background: #171a17; color: #f0eee7; }
 .home-view .eyebrow { color: var(--green); }
 .home-view .text-action { color: var(--green); }
 
@@ -354,3 +356,32 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .crop-hint { margin: 5px 0 0; color: #93998f; font-size: 9px; line-height: 1.5; }
+
+.preview-mode-switch { display: grid; grid-template-columns: 1fr 1.35fr; gap: 3px; margin: 0 0 10px; padding: 3px; border: 1px solid #373c35; background: #111311; }
+.preview-mode-switch button { min-height: 32px; padding: 5px 7px; border: 0; background: transparent; color: #a4a99f; cursor: pointer; font-size: 10px; transition: background .18s ease, color .18s ease; }
+.preview-mode-switch button:hover { color: #f0eee7; }
+.preview-mode-switch button.active { background: var(--green); color: #171914; font-weight: 700; }
+.layered-look { position: relative; isolation: isolate; width: 100%; height: 330px; overflow: hidden; border: 1px solid #d1cec3; background: #e8e4da; }
+.layered-piece { position: absolute; z-index: calc(1 + var(--piece-order)); display: grid; place-items: center; pointer-events: none; }
+.layered-piece img { display: block; width: 100%; height: 100%; object-fit: contain; background: transparent; mix-blend-mode: multiply; }
+.layered-piece-top { top: 9%; left: 24%; width: 52%; height: 46%; }
+.layered-piece-outerwear { top: 5%; left: 19%; width: 62%; height: 55%; }
+.layered-piece-bottom { top: 37%; left: 26%; width: 48%; height: 59%; }
+.layered-piece-dress { top: 7%; left: 20%; width: 60%; height: 86%; }
+.layered-piece-shoes { top: 73%; left: 28%; width: 44%; height: 24%; }
+.layered-piece-accessory { top: 4%; right: 5%; width: 25%; height: 22%; }
+.layered-look-caption { position: absolute; z-index: 20; right: 8px; bottom: 7px; padding: 4px 6px; background: rgba(232,228,218,.86); color: #596251; font-size: 8px; font-weight: 700; letter-spacing: .7px; }
+.layering-hint { margin: 8px 0 0; color: #a4a99f; font-size: 9px; line-height: 1.55; }
+.look-images { display: block; padding: 0; background: transparent; }
+.look-images > .layered-look { height: 100%; min-height: 190px; border: 0; }
+.layered-look-compact .layered-piece-top { top: 8%; left: 24%; width: 52%; height: 49%; }
+.layered-look-compact .layered-piece-outerwear { top: 3%; left: 19%; width: 62%; height: 58%; }
+.layered-look-compact .layered-piece-bottom { top: 36%; left: 27%; width: 46%; height: 62%; }
+.layered-look-compact .layered-piece-dress { top: 5%; left: 20%; width: 60%; height: 91%; }
+.layered-look-compact .layered-piece-shoes { top: 72%; left: 28%; width: 44%; height: 26%; }
+.layered-look-compact .layered-piece-accessory { top: 3%; right: 5%; width: 25%; height: 22%; }
+@media (max-width: 700px) {
+  .layered-look { height: min(86vw, 380px); }
+  .look-images > .layered-look { height: 220px; }
+}
+
