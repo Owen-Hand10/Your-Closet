@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownUp, Check, ChevronDown, CircleHelp, Heart, ImagePlus, LayoutGrid,
-  Plus, Search, Shirt, Sparkles, Trash2, Upload, X,
+  Plus, RotateCcw, Search, Shirt, Sparkles, Trash2, Upload, X,
 } from 'lucide-react';
 import { loadItems, loadLooks, saveItems, saveLooks } from './data/store.js';
+import { removeImageBackground } from './services/backgroundRemoval.js';
 
 const CATEGORIES = ['Top', 'Bottom', 'Dress', 'Outerwear', 'Shoes', 'Accessory'];
 const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter', 'All season'];
@@ -25,7 +26,8 @@ function imageToDataUrl(file) {
       canvas.width = Math.round(image.naturalWidth * scale);
       canvas.height = Math.round(image.naturalHeight * scale);
       canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.84));
+      const preservesTransparency = file.type === 'image/png' || file.type === 'image/webp';
+      resolve(canvas.toDataURL(preservesTransparency ? 'image/webp' : 'image/jpeg', 0.84));
     };
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
@@ -52,7 +54,8 @@ function cropImage(source, zoom, focusX, focusY) {
       canvas.width = 800;
       canvas.height = 1000;
       canvas.getContext('2d').drawImage(image, left, top, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.86));
+      const preservesTransparency = source.startsWith('data:image/png') || source.startsWith('data:image/webp');
+      resolve(canvas.toDataURL(preservesTransparency ? 'image/webp' : 'image/jpeg', 0.88));
     };
     image.onerror = () => reject(new Error('The crop preview could not be created.'));
     image.src = source;
@@ -69,7 +72,19 @@ function initialForm(item) {
     notes: item?.notes ?? '',
     originalImage: item?.originalImage ?? '',
     image: item?.image ?? '',
+    backgroundRemovedImage: item?.backgroundRemoved ? item.image : '',
+    backgroundRemoved: Boolean(item?.backgroundRemoved),
+    crop: item?.crop ?? { zoom: 1, focusX: 0.5, focusY: 0.5 },
   };
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('The transparent image could not be saved in this browser.'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 function App() {
@@ -90,10 +105,31 @@ function App() {
   const [storageError, setStorageError] = useState('');
   const [photoError, setPhotoError] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [focusX, setFocusX] = useState(0.5);
-  const [focusY, setFocusY] = useState(0.5);
+  const [feedback, setFeedback] = useState('');
+  const [removalStatus, setRemovalStatus] = useState('idle');
+  const [modelProgress, setModelProgress] = useState('');
+  const [crop, setCrop] = useState({ zoom: 1, focusX: 0.5, focusY: 0.5 });
+  const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
+  const [sourceSize, setSourceSize] = useState({ width: 0, height: 0 });
   const fileInput = useRef(null);
+  const previewFrame = useRef(null);
+  const itemDialog = useRef(null);
+  const confirmDialog = useRef(null);
+  const dialogReturnFocus = useRef(null);
+  const cropSource = form.backgroundRemovedImage || form.originalImage;
+
+  const cropPreviewStyle = useMemo(() => {
+    if (!sourceSize.width || !sourceSize.height || !previewSize.width || !previewSize.height) return undefined;
+    const scale = Math.max(previewSize.width / sourceSize.width, previewSize.height / sourceSize.height) * crop.zoom;
+    const width = sourceSize.width * scale;
+    const height = sourceSize.height * scale;
+    return {
+      width: `${width}px`,
+      height: `${height}px`,
+      left: `${(previewSize.width - width) * crop.focusX}px`,
+      top: `${(previewSize.height - height) * crop.focusY}px`,
+    };
+  }, [sourceSize, previewSize, crop]);
 
   useEffect(() => {
     try { saveItems(items); setStorageError(''); }
@@ -106,13 +142,51 @@ function App() {
   }, [looks]);
 
   useEffect(() => {
-    if (!modalOpen && !deleteTarget) return undefined;
+    const dialog = modalOpen ? itemDialog.current : deleteTarget ? confirmDialog.current : null;
+    if (!dialog) {
+      const returnTarget = dialogReturnFocus.current?.isConnected
+        ? dialogReturnFocus.current
+        : document.querySelector('.main-nav .active');
+      returnTarget?.focus?.();
+      dialogReturnFocus.current = null;
+      return undefined;
+    }
+    const focusable = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled):not(.sr-only), select:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])')];
+    focusable[0]?.focus();
     const onKeyDown = (event) => {
       if (event.key === 'Escape') { setModalOpen(false); setDeleteTarget(null); }
+      if (event.key === 'Tab' && focusable.length) {
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+          event.preventDefault(); last.focus();
+        } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+          event.preventDefault(); first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [modalOpen, deleteTarget]);
+
+  useEffect(() => {
+    if (!modalOpen || !cropSource || !previewFrame.current) return undefined;
+    const node = previewFrame.current;
+    const updateSize = () => {
+      const { width, height } = node.getBoundingClientRect();
+      setPreviewSize((current) => current.width === width && current.height === height ? current : { width, height });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [modalOpen, cropSource]);
+
+  useEffect(() => {
+    if (!feedback) return undefined;
+    const timeout = window.setTimeout(() => setFeedback(''), 3200);
+    return () => window.clearTimeout(timeout);
+  }, [feedback]);
 
   const visibleItems = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -126,18 +200,23 @@ function App() {
   const selectedItems = selectedIds.map((id) => items.find((item) => item.id === id)).filter(Boolean);
 
   function openNewItem() {
+    dialogReturnFocus.current = document.activeElement;
     setEditingItem(null);
     setForm(initialForm(null));
     setPhotoError('');
-    setZoom(1); setFocusX(0.5); setFocusY(0.5);
+    setCrop({ zoom: 1, focusX: 0.5, focusY: 0.5 });
+    setRemovalStatus('idle'); setModelProgress('');
     setModalOpen(true);
   }
 
   function openEditItem(item) {
+    dialogReturnFocus.current = document.activeElement;
     setEditingItem(item);
     setForm(initialForm(item));
     setPhotoError('');
-    setZoom(1); setFocusX(0.5); setFocusY(0.5);
+    setCrop(item.backgroundRemoved ? { zoom: 1, focusX: 0.5, focusY: 0.5 } : item.crop ?? { zoom: 1, focusX: 0.5, focusY: 0.5 });
+    setRemovalStatus(item.backgroundRemoved ? 'success' : 'idle');
+    setModelProgress(item.backgroundRemoved ? 'Saved transparent cutout. Original is unchanged.' : '');
     setModalOpen(true);
   }
 
@@ -148,40 +227,57 @@ function App() {
     setProcessing(true); setPhotoError('');
     try {
       const image = await imageToDataUrl(file);
-      setForm((current) => ({ ...current, originalImage: image, image }));
-      setZoom(1); setFocusX(0.5); setFocusY(0.5);
+      setForm((current) => ({ ...current, originalImage: image, backgroundRemovedImage: '', backgroundRemoved: false, image }));
+      setCrop({ zoom: 1, focusX: 0.5, focusY: 0.5 });
+      setRemovalStatus('idle'); setModelProgress('');
     } catch (error) { setPhotoError(error.message); }
     finally { setProcessing(false); }
   }
 
-  async function applyCrop() {
+  async function handleBackgroundRemoval() {
     if (!form.originalImage) return;
-    setProcessing(true); setPhotoError('');
+    setProcessing(true); setPhotoError(''); setRemovalStatus('processing'); setModelProgress('Loading the image model…');
     try {
-      const image = await cropImage(form.originalImage, zoom, focusX, focusY);
-      setForm((current) => ({ ...current, image }));
-    } catch (error) { setPhotoError(error.message); }
+      const result = await removeImageBackground(form.originalImage, (progress) => {
+        if (progress.total > 0) setModelProgress(`${progress.key}: ${Math.round((progress.current / progress.total) * 100)}%`);
+      });
+      const image = await blobToDataUrl(result);
+      setForm((current) => ({ ...current, backgroundRemovedImage: image, backgroundRemoved: true }));
+      setRemovalStatus('success'); setModelProgress('Background removed. The original is unchanged.');
+    } catch (error) {
+      setRemovalStatus('error'); setPhotoError(error.message || 'Background removal failed. Your original photo is unchanged.');
+    }
     finally { setProcessing(false); }
   }
 
-  function saveItem(event) {
+  async function saveItem(event) {
     event.preventDefault();
     if (!form.originalImage) { setPhotoError('Add a photo of your clothing item first.'); return; }
-    const item = {
-      ...form,
-      id: editingItem?.id ?? makeId(),
-      name: form.name.trim() || `${form.color || 'Untitled'} ${form.category.toLowerCase()}`,
-      color: form.color.trim(),
-      notes: form.notes.trim(),
-      createdAt: editingItem?.createdAt ?? Date.now(),
-    };
-    setItems((current) => editingItem ? current.map((entry) => entry.id === item.id ? item : entry) : [item, ...current]);
-    setModalOpen(false);
+    setProcessing(true); setPhotoError('');
+    try {
+      const image = await cropImage(cropSource, crop.zoom, crop.focusX, crop.focusY);
+      const { backgroundRemovedImage, ...itemForm } = form;
+      const item = {
+        ...itemForm,
+        image,
+        backgroundRemoved: Boolean(backgroundRemovedImage || form.backgroundRemoved),
+        crop,
+        id: editingItem?.id ?? makeId(),
+        name: form.name.trim() || `${form.color || 'Untitled'} ${form.category.toLowerCase()}`,
+        color: form.color.trim(),
+        notes: form.notes.trim(),
+        createdAt: editingItem?.createdAt ?? Date.now(),
+      };
+      setItems((current) => editingItem ? current.map((entry) => entry.id === item.id ? item : entry) : [item, ...current]);
+      setModalOpen(false); setFeedback(editingItem ? 'Changes saved.' : 'Piece added to your closet.');
+    } catch (error) { setPhotoError(error.message); }
+    finally { setProcessing(false); }
   }
 
   function deleteItem() {
     setItems((current) => current.filter((item) => item.id !== deleteTarget.id));
     setSelectedIds((current) => current.filter((id) => id !== deleteTarget.id));
+    setFeedback('Piece removed from your closet.');
     setDeleteTarget(null);
   }
 
@@ -204,7 +300,13 @@ function App() {
 
   function deleteLook() {
     setLooks((current) => current.filter((look) => look.id !== deleteTarget.id));
+    setFeedback('Look removed from your lookbook.');
     setDeleteTarget(null);
+  }
+
+  function requestDelete(target) {
+    dialogReturnFocus.current = document.activeElement;
+    setDeleteTarget(target);
   }
 
   function revisitLook(look) {
@@ -239,9 +341,10 @@ function App() {
         </section>
 
         {storageError && <p className="storage-alert" role="alert">{storageError}</p>}
+        {feedback && <p className="feedback-toast" role="status">{feedback}</p>}
 
         {view === 'closet' && (
-          <section aria-label="Virtual closet">
+          <section className="closet-view view-motion" aria-label="Virtual closet">
             {items.length === 0 ? (
               <div className="empty-closet">
                 <div className="empty-copy">
@@ -277,7 +380,7 @@ function App() {
                           <div className="item-title"><h3>{item.name}</h3><button className="icon-button more-button" onClick={() => openEditItem(item)} aria-label={`Edit ${item.name}`} title="Edit piece"><span aria-hidden="true">···</span></button></div>
                           <p>{[item.color, item.season, item.occasion].filter(Boolean).join(' · ')}</p>
                           {item.notes && <p className="item-notes">{item.notes}</p>}
-                          <button className="text-action" onClick={() => { setDeleteTarget({ id: item.id, name: item.name, type: 'item' }); }}>Remove piece</button>
+                          <button className="text-action" onClick={() => requestDelete({ id: item.id, name: item.name, type: 'item' })}>Remove piece</button>
                         </div>
                       </article>
                     ))}
@@ -289,7 +392,7 @@ function App() {
         )}
 
         {view === 'builder' && (
-          <section className="builder-layout" aria-label="Outfit builder">
+          <section className="builder-layout view-motion" aria-label="Outfit builder">
             <div className="builder-main">
               <div className="section-heading"><div><p className="eyebrow">Choose your pieces</p><h2>Build a look</h2></div><span className="selection-count">{selectedItems.length} selected</span></div>
               {items.length ? <div className="picker-grid">{items.map((item) => {
@@ -315,7 +418,7 @@ function App() {
         )}
 
         {view === 'looks' && (
-          <section className="looks-section" aria-label="Saved outfits">
+          <section className="looks-section view-motion" aria-label="Saved outfits">
             <div className="section-heading"><div><p className="eyebrow">Your personal lookbook</p><h2>Saved looks</h2></div><span className="selection-count">{looks.length} {looks.length === 1 ? 'look' : 'looks'}</span></div>
             {looks.length ? <div className="looks-grid">{looks.map((look) => {
               const lookItems = look.itemIds.map((id) => items.find((item) => item.id === id)).filter(Boolean);
@@ -323,7 +426,7 @@ function App() {
                 <div className="look-images">{lookItems.slice(0, 3).map((item) => <img src={item.image} alt={item.name} key={item.id} />)}{!lookItems.length && <div className="look-empty"><Shirt size={25} /></div>}</div>
                 <div className="look-details"><div><p className="eyebrow">{new Date(look.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</p><h3>{look.name}</h3></div><span>{lookItems.length} {lookItems.length === 1 ? 'piece' : 'pieces'}</span></div>
                 {look.notes && <p className="look-notes">{look.notes}</p>}
-                <div className="look-actions"><button className="text-action" onClick={() => revisitLook(look)}>Open in builder</button><button className="icon-button" onClick={() => setDeleteTarget({ id: look.id, name: look.name, type: 'look' })} aria-label={`Delete ${look.name}`} title="Delete look"><Trash2 size={16} /></button></div>
+                <div className="look-actions"><button className="text-action" onClick={() => revisitLook(look)}>Open in builder</button><button className="icon-button" onClick={() => requestDelete({ id: look.id, name: look.name, type: 'look' })} aria-label={`Delete ${look.name}`} title="Delete look"><Trash2 size={16} /></button></div>
               </article>;
             })}</div> : <div className="looks-empty"><div className="empty-heart"><Heart size={25} /></div><h3>Your lookbook starts here.</h3><p>Choose a few pieces in the outfit builder and save a look to come back to it later.</p><button className="button button-dark" onClick={() => setView('builder')}>Start an outfit <ChevronDown size={15} className="turn-icon" /></button></div>}
           </section>
@@ -333,23 +436,35 @@ function App() {
       <footer className="site-footer"><span>YOUR CLOSET, YOURS ALONE.</span><span>Made for wearing, not just collecting.</span><button onClick={() => setView('closet')}>Back to your closet <ChevronDown size={13} className="turn-icon" /></button></footer>
 
       {modalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setModalOpen(false); }}>
-        <section className="item-modal" role="dialog" aria-modal="true" aria-labelledby="item-modal-title">
+        <section className="item-modal" ref={itemDialog} role="dialog" aria-modal="true" aria-labelledby="item-modal-title">
           <header className="modal-header"><div><p className="eyebrow">A piece of your story</p><h2 id="item-modal-title">{editingItem ? 'Edit this piece' : 'Add to your closet'}</h2></div><button className="icon-button close-button" onClick={() => setModalOpen(false)} aria-label="Close"><X size={19} /></button></header>
           <form onSubmit={saveItem}>
             <div className="modal-content">
               <div className="photo-column">
                 <div className="upload-zone">
-                  {form.originalImage ? <div className="photo-compare"><figure><img src={form.originalImage} alt="Original clothing photo" /><figcaption>Original</figcaption></figure><figure><img src={form.image || form.originalImage} alt="Clothing photo preview" /><figcaption>Closet preview</figcaption></figure></div> : <button type="button" className="upload-prompt" onClick={() => fileInput.current?.click()}><Upload size={23} /><strong>{processing ? 'Preparing photo…' : 'Choose a photo'}</strong><span>JPG, PNG or WebP · up to 15 MB</span></button>}
+                  {form.originalImage ? <div className="photo-compare">
+                    <figure><div className="original-frame"><img src={form.originalImage} alt="Original clothing upload, unchanged" /></div><figcaption>Original upload</figcaption></figure>
+                    <figure><div className="live-crop-frame transparent-grid" ref={previewFrame}>
+                      <img key={cropSource} src={cropSource} alt="Live crop preview" style={cropPreviewStyle} onLoad={(event) => setSourceSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
+                      {form.backgroundRemovedImage && <span className="transparent-label">TRANSPARENT</span>}
+                    </div><figcaption>{form.backgroundRemovedImage ? 'Background removed' : 'Live crop preview'}</figcaption></figure>
+                  </div> : <button type="button" className="upload-prompt" onClick={() => fileInput.current?.click()}><Upload size={23} /><strong>{processing ? 'Preparing photo…' : 'Choose a photo'}</strong><span>JPG, PNG or WebP · up to 15 MB</span></button>}
                   <input ref={fileInput} className="sr-only" type="file" accept="image/*" onChange={(event) => handleFile(event.target.files?.[0])} />
                   {form.originalImage && <button className="text-action replace-photo" type="button" onClick={() => fileInput.current?.click()}><ImagePlus size={15} /> Replace photo</button>}
                 </div>
                 {form.originalImage && <div className="crop-controls">
-                  <div className="crop-heading"><div><p className="eyebrow">Image cleanup</p><h3>Find your frame</h3></div><span className="prototype-tag">Crop prototype</span></div>
-                  <p className="prototype-copy">Adjust the crop to give your piece a little breathing room. Background removal is not connected; your original stays untouched.</p>
-                  <label className="range-label">Zoom <input type="range" min="1" max="2.5" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /><span>{zoom.toFixed(1)}x</span></label>
-                  <label className="range-label">Horizontal <input type="range" min="0" max="1" step="0.01" value={focusX} onChange={(event) => setFocusX(Number(event.target.value))} /><span>{Math.round(focusX * 100)}%</span></label>
-                  <label className="range-label">Vertical <input type="range" min="0" max="1" step="0.01" value={focusY} onChange={(event) => setFocusY(Number(event.target.value))} /><span>{Math.round(focusY * 100)}%</span></label>
-                  <button className="button button-outline crop-apply" type="button" onClick={applyCrop} disabled={processing}><Check size={15} /> {processing ? 'Working…' : 'Apply crop'}</button>
+                  <div className="crop-heading"><div><p className="eyebrow">Image cleanup</p><h3>Refine your frame</h3></div><button className="icon-button reset-crop" type="button" onClick={() => setCrop({ zoom: 1, focusX: 0.5, focusY: 0.5 })} aria-label="Reset crop framing" title="Reset crop framing"><RotateCcw size={15} /></button></div>
+                  <p className="prototype-copy">Crop changes appear in the preview immediately and are saved when you add this piece. Background removal runs in this browser; its model downloads on first use.</p>
+                  <label className="range-label">Zoom <input type="range" min="1" max="2.5" step="0.05" value={crop.zoom} onChange={(event) => setCrop((current) => ({ ...current, zoom: Number(event.target.value) }))} /><span>{crop.zoom.toFixed(1)}x</span></label>
+                  <label className="range-label">Horizontal <input type="range" min="0" max="1" step="0.01" value={crop.focusX} onChange={(event) => setCrop((current) => ({ ...current, focusX: Number(event.target.value) }))} /><span>{Math.round(crop.focusX * 100)}%</span></label>
+                  <label className="range-label">Vertical <input type="range" min="0" max="1" step="0.01" value={crop.focusY} onChange={(event) => setCrop((current) => ({ ...current, focusY: Number(event.target.value) }))} /><span>{Math.round(crop.focusY * 100)}%</span></label>
+                  <div className="background-actions">
+                    <button className="button button-outline remove-background" type="button" onClick={handleBackgroundRemoval} disabled={processing}><Sparkles size={15} /> {removalStatus === 'processing' ? 'Removing background…' : removalStatus === 'success' ? 'Try again' : removalStatus === 'error' ? 'Retry removal' : 'Remove background'}</button>
+                    <button className="button button-quiet keep-original" type="button" onClick={() => { setForm((current) => ({ ...current, backgroundRemovedImage: '', backgroundRemoved: false })); setRemovalStatus('idle'); setPhotoError(''); setModelProgress(''); }} disabled={!form.backgroundRemovedImage || processing}>Keep original</button>
+                  </div>
+                  {removalStatus === 'processing' && <p className="processing-status" role="status" aria-live="polite"><span className="loading-dot" /> {modelProgress || 'Preparing model…'}</p>}
+                  {removalStatus === 'success' && <p className="success-status" role="status">{modelProgress}</p>}
+                  {removalStatus === 'idle' && <p className="provider-note">Photo processing stays on this device. The model is fetched from IMG.LY on first use.</p>}
                 </div>}
                 {photoError && <p className="form-error" role="alert">{photoError}</p>}
               </div>
@@ -361,13 +476,13 @@ function App() {
                 <p className="form-footnote">A photo is needed. Every other detail can be changed later.</p>
               </div>
             </div>
-            <div className="modal-footer"><button type="button" className="button button-quiet" onClick={() => setModalOpen(false)}>Cancel</button><button className="button button-dark" type="submit" disabled={processing}><Check size={16} /> {editingItem ? 'Save changes' : 'Add to closet'}</button></div>
+            <div className="modal-footer"><button type="button" className="button button-quiet" onClick={() => setModalOpen(false)}>Cancel</button><button className="button button-dark" type="submit" disabled={processing}><Check size={16} /> {processing ? 'Processing…' : editingItem ? 'Save changes' : 'Add to closet'}</button></div>
           </form>
         </section>
       </div>}
 
       {deleteTarget && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteTarget(null); }}>
-        <section className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-copy">
+        <section className="confirm-modal" ref={confirmDialog} role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-copy">
           <div className="confirm-icon"><Trash2 size={20} /></div><h2 id="delete-title">Remove {deleteTarget.type === 'look' ? 'this look' : 'this piece'}?</h2><p id="delete-copy"><strong>{deleteTarget.name}</strong> will be removed from {deleteTarget.type === 'look' ? 'your saved looks' : 'your closet'}. This cannot be undone.</p>
           <div className="confirm-actions"><button className="button button-quiet" onClick={() => setDeleteTarget(null)}>Keep it</button><button className="button button-danger" onClick={deleteTarget.type === 'look' ? deleteLook : deleteItem}>Remove</button></div>
         </section>
